@@ -1,4 +1,4 @@
-use std::io;
+use std::{io,fs};
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
@@ -10,29 +10,57 @@ use super::error::Result;
 
 
 pub type Series = Vec<(NaiveDate,f64)>;
-pub type GraphData = Vec<(&'static str,Series)>;
+pub type GraphData = Vec<(String,Series)>;
 
 
 pub fn cases_graph(graph_path: &Path, group: &str, level: &str,
 		   data: &GraphData) -> Result<()> {
-    graph(graph_path, &format!("{}-absolute.html", group),
-	  &format!("Number of confirmed COVID-19 cases by {}", level),
+    let graph_path = graph_path.join(group);
+    graph(&graph_path, "absolute.html",
+	  &format!("Number of total confirmed COVID-19 cases by {}", level),
 	  "Count", json!({"type":"log"}), vec![], data)
+}
+
+
+pub fn daily_graph(graph_path: &Path, group: &str, level: &str,
+		   smoothing: usize, data: &GraphData) -> Result<()> {
+    let graph_path = graph_path.join(group);
+    let filename = match smoothing {
+	1 => format!("daily.html"),
+	n => format!("daily-{}days.html", n),
+    };
+    let title = match smoothing {
+	1 => format!("Number of daily confirmed COVID-19 \
+		      cases by {}",  level),
+	n => format!("{}-day average number of daily confirmed COVID-19 \
+		      cases by {}", n, level),
+    };
+    graph(&graph_path, &filename, &title, "Count",
+	  json!({}), vec![], data)
 }
 
 
 pub fn growth_graph(graph_path: &Path, group: &str, level: &str,
 		    smoothing: usize, data: &GraphData) -> Result<()> {
-    graph(graph_path, &format!("{}-growth-{}days.html", group, smoothing),
-	  &format!("Average daily growth of {}-day average confirmed \
-		    COVID-19 cases by {}", smoothing, level),
-	  "Factor", json!({"domain":[0.5, 1.5]}), vec![1.0], data)
+    let graph_path = graph_path.join(group);
+    let filename = match smoothing {
+	1 => format!("growth.html"),
+	n => format!("growth-{}days.html", n),
+    };
+    let title = match smoothing {
+	1 => format!("Daily growth of confirmed COVID-19 cases by {}", level),
+	n => format!("Average daily growth of {}-day average confirmed \
+		      COVID-19 cases by {}", n, level)
+    };
+    graph(&graph_path, &filename, &title, "Factor",
+	  json!({"domain":[0.5, 1.5]}), vec![1.0], data)
 }
 
 
 fn graph(graph_path: &Path, path: &str, title: &str, ytitle: &str, scale: Value,
-	 refs: Vec<f64>, data: &Vec<(&str,Vec<(NaiveDate,f64)>)>) -> Result<()> {
+	 refs: Vec<f64>, data: &Vec<(String,Vec<(NaiveDate,f64)>)>) -> Result<()> {
 
+    fs::create_dir_all(graph_path)?;
     let mut out = io::BufWriter::new(File::create(graph_path.join(path))?);
 
     write!(out, "<!DOCTYPE html><html><head>")?;
@@ -56,7 +84,7 @@ fn graph(graph_path: &Path, path: &str, title: &str, ytitle: &str, scale: Value,
 	"data": {
 	    "values": data.iter().flat_map(
 		|(region,vals)| vals.iter().filter_map(
-		    move |(date,val)| match val.is_normal() {
+		    move |(date,val)| match val.is_normal() || *val == 0.0 {
 			false => None,
 			true => Some(json!({
 			    "Date": format!("{}", date.format("%Y-%m-%d")),

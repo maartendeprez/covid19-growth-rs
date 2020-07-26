@@ -13,7 +13,9 @@ pub enum Error {
     HttpError(reqwest::StatusCode),
     SystemTime(time::SystemTimeError),
     ParseInt(num::ParseIntError),
+    ParseDate(chrono::format::ParseError),
     MissingRegion(&'static str),
+    MissingData,
 }
 
 impl From<io::Error> for Error {
@@ -52,6 +54,12 @@ impl From<num::ParseIntError> for Error {
     }
 }
 
+impl From<chrono::format::ParseError> for Error {
+    fn from(err: chrono::format::ParseError) -> Self {
+	Self::ParseDate(err)
+    }
+}
+
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -63,7 +71,9 @@ impl fmt::Display for Error {
 	    Self::HttpError(err) => write!(f, "HTTP error: {}", err),
 	    Self::SystemTime(err) => write!(f, "System Time error: {}", err),
 	    Self::ParseInt(err) => write!(f, "Integer parse error: {}", err),
+	    Self::ParseDate(err) => write!(f, "Date parse error: {}", err),
 	    Self::MissingRegion(name) => write!(f, "Missing region: {}", name),
+	    Self::MissingData => write!(f, "No data!"),
 	}
     }
 }

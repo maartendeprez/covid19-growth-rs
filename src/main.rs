@@ -17,7 +17,7 @@ fn main() -> Result<()> {
 
     let graph_path = PathBuf::from("graphs");
     let cache_path = PathBuf::from("cache");
-    let smoothings = vec![7,14];
+    let smoothings = vec![1,7,14];
 
     fs::create_dir_all(&graph_path)?;
 
@@ -90,9 +90,9 @@ fn main() -> Result<()> {
 	regions.sort();
 
 	graphs(&graph_path, &smoothings,
-	       &format!("csse-{}", group), "country",
+	       &format!("csse/{}", group), "country",
 	       &regions.iter().map(
-		   |(region,keys)| Ok((*region, sum_series(&keys.iter().map(
+		   |(region,keys)| Ok((region.to_string(), sum_series(&keys.iter().map(
 		       |key| data.get(*key).ok_or(Error::MissingRegion(*key))
 		   ).collect::<Result<_>>()?)))
 	       ).collect::<Result<_>>()?)?;
@@ -100,36 +100,84 @@ fn main() -> Result<()> {
     }
 
     
-    /* Graphs from Sciensano data. */
+    /* Graphs from Sciensano municipality data. */
 
     let belgium = vec![
 	(sciensano::Level::Municipality, vec![
 	    "Scherpenheuvel-Zichem", "Holsbeek", "Aarschot", "Kortrijk", "Herselt",
 	    "Wervik", "Leuven", "Brussel", "Mechelen", "Antwerpen", "Gent", "Tienen",
 	    "Hasselt", "Sint-Truiden", "Westerlo", "Heist-op-den-Berg"
-	]),
+	]) /*,
 	(sciensano::Level::Province, vec![
 	    "Vlaams-Brabant", "Antwerpen", "Limburg", "West-Vlaanderen", "Oost-Vlaanderen",
 	    "Waals-Brabant", "Namen", "Luik", "Henegouwen", "Luxemburg"
 	]),
-	(sciensano::Level::Country, vec!["Belgium"])
+	(sciensano::Level::Country, vec!["Belgium"]) */
     ];
 
-    let data = sciensano::cases(&cache_path)?;
+    let data = sciensano::cases_muni(&cache_path)?;
 
     for (level,mut regions) in belgium {
 
 	regions.sort();
 
 	graphs(&graph_path, &smoothings,
-	       &format!("belgium-{}", level.name()), level.name(),
+	       &format!("belgium/{}", level.name()), level.name(),
 	       &regions.iter().map(|region| {
-		   let series = sciensano::case_series(&data, |cs| level.filter(region, cs));
-		   (*region, sciensano::case_dates().zip(interpolate(series)).collect())
+		   let series = sciensano::cases_muni_series(&data, |cs| level.filter_muni(region, cs));
+		   (region.to_string(), sciensano::cases_muni_dates().zip(interpolate(series)).collect())
 	       }).collect())?;
-	
+
     }
-    
+
+
+    /* Graphs from Sciensano agesex data. */
+
+    let data = sciensano::cases_agesex(&cache_path)?;
+
+    let mut by_province = BTreeMap::new();
+    let mut by_region = BTreeMap::new();
+    let mut by_country = BTreeMap::new();
+
+    for row in &data {
+	let date = NaiveDate::parse_from_str(row.date.as_ref().map(|d| d.as_str())
+					     .unwrap_or("2020-02-29"), "%Y-%m-%d")?;
+	if let Some(province) = row.province.clone() {
+	    *by_province.entry(province).or_insert_with(BTreeMap::new)
+		.entry(date).or_insert(0.0) += row.cases as f64;
+	}
+	if let Some(region) = row.region.clone() {
+	    *by_region.entry(region).or_insert_with(BTreeMap::new)
+		.entry(date).or_insert(0.0) += row.cases as f64;
+	}
+	*by_country.entry(date).or_insert(0.0) += row.cases as f64;
+    }
+
+    let date_range = NaiveDateRange(*by_country.keys().min().ok_or(Error::MissingData)?,
+				    Some(*by_country.keys().max().ok_or(Error::MissingData)?));
+    let groups = vec![
+	("country", vec![("Belgium".to_string(), date_range.clone().scan(
+	    0.0, |sum,date| { *sum += by_country.remove(&date).unwrap_or(0.0);
+			       Some((date, *sum)) }).collect())]),
+	("province", by_province.into_iter().map(
+	    |(key,mut series)| (key, date_range.clone().scan(
+		0.0, |sum,date| { *sum += series.remove(&date).unwrap_or(0.0);
+				   Some((date, *sum)) }).collect())
+	).collect()),
+	("region", by_region.into_iter().map(
+	    |(key,mut series)| (key, date_range.clone().scan(
+		0.0, |sum,date| { *sum += series.remove(&date).unwrap_or(0.0);
+				   Some((date, *sum)) }).collect())
+	).collect())
+    ];
+
+    for (group,regions) in groups {
+	//regions.sort();
+	graphs(&graph_path, &smoothings,
+	       &format!("belgium/{}", group), group,
+	       &regions)?;
+    }
+
     Ok(())
 
 }
@@ -138,8 +186,11 @@ fn graphs(graph_path: &Path, smoothings: &Vec<usize>,
 	  group: &str, level: &str, data: &GraphData) -> Result<()> {
     graph::cases_graph(graph_path, group, level, &data)?;
     for smoothing in smoothings {
+	graph::daily_graph(graph_path, group, level, *smoothing, &data.iter().map(
+	    |(region,series)| (region.clone(), average(&daily(series), *smoothing))
+	).collect())?;
 	graph::growth_graph(graph_path, group, level, *smoothing, &data.iter().map(
-	    |(region,series)| (*region, growths(&average(&daily(series), *smoothing), *smoothing))
+	    |(region,series)| (region.clone(), growths(&average(&daily(series), *smoothing), *smoothing))
 	).collect())?;
     }
     Ok(())
@@ -181,7 +232,7 @@ fn daily(data: &Series) -> Series {
 
 fn growths(data: &Series, avg: usize) -> Series {
     (0..data.len()).map(
-	|i| (data[i].0, match data[i].1 == 0.0 || data[i - avg.min(i)].1 == 0.0 {
+	|i| (data[i].0, match data[i].1 <= 0.0 || data[i - avg.min(i)].1 <= 0.0 {
 	    true => 1.0,
 	    false => (data[i].1 / data[i - avg.min(i)].1).powf(1.0 / avg as f64)
 	})
@@ -208,13 +259,13 @@ fn sum_series(data: &Vec<&Series>) -> Series {
     result.into_iter().collect()
 }
 
-
+#[derive(Clone,Debug)]
 pub struct NaiveDateRange(NaiveDate,Option<NaiveDate>);
 
 impl Iterator for NaiveDateRange {
     type Item = NaiveDate;
     fn next(&mut self) -> Option<NaiveDate> {
-	match self.1.map_or(true, |end| self.0 < end) {
+	match self.1.map_or(true, |end| self.0 <= end) {
 	    false => None,
 	    true => {
 		let current = self.0;

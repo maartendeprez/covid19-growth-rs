@@ -13,12 +13,23 @@ use super::NaiveDateRange;
 
 #[derive(Serialize,Deserialize,Debug)]
 #[serde(rename_all = "UPPERCASE")]
-pub struct Cases {
+pub struct CasesMuni {
     tx_descr_nl: Option<String>,
     tx_adm_dstr_descr_nl: Option<String>,
     tx_prov_descr_nl: Option<String>,
     tx_rgn_descr_nl: Option<String>,
     cases: String
+}
+
+#[derive(Serialize,Deserialize,Debug)]
+#[serde(rename_all = "UPPERCASE")]
+pub struct CasesAgeSex {
+    pub date: Option<String>,
+    pub province: Option<String>,
+    pub region: Option<String>,
+    pub agegroup: Option<String>,
+    pub sex: Option<String>,
+    pub cases: u64
 }
 
 pub enum Level {
@@ -41,7 +52,7 @@ impl Level {
 	}
     }
 
-    pub fn filter(&self, val: &str, cases: &Cases) -> bool {
+    pub fn filter_muni(&self, val: &str, cases: &CasesMuni) -> bool {
 	match self {
 	    Self::Municipality => cases.tx_descr_nl.as_ref()
 		.map_or(false, |v| val == v.as_str()),
@@ -58,34 +69,36 @@ impl Level {
 }
 
 
-pub fn case_series<F>(data: &Vec<Vec<Cases>>,filter: F) -> Vec<Option<u64>>
-where F: for<'r> Fn(&'r Cases) -> bool {
+pub fn cases_muni_series<F>(data: &Vec<Vec<CasesMuni>>,filter: F) -> Vec<Option<u64>>
+where F: for<'r> Fn(&'r CasesMuni) -> bool {
     data.iter().map(
 	|cs| cs.iter().filter(|cs| filter(*cs))
-	    .fold(None, |a,b| match (a,b.cases.parse().ok()) {
-		(Some(a),Some(b)) => Some(a+b),
-		(Some(a),None) => Some(a),
-		(_,b) => b
+	    .fold(None, |a,b| match b.cases.as_str() {
+		"<5" => a,
+		n => Some(a.unwrap_or(0) + n.parse::<u64>()
+			  .expect(&format!("failed to parse number of cases {:?}!", n)))
 	    })
     ).collect()
 }
 
 
-pub fn cases(cache_path: &Path) -> Result<Vec<Vec<Cases>>> {
+pub fn cases_muni(cache_path: &Path) -> Result<Vec<Vec<CasesMuni>>> {
     NaiveDateRange(NaiveDate::from_ymd(2020, 3, 31),
-		   Some(Local::today().naive_local()))
-	.map(|date| Ok(cases_per_day(cache_path, date)?
+		   Some(Local::today().naive_local()
+			- Duration::days(1)))
+	.map(|date| Ok(cases_muni_per_day(cache_path, date)?
 		       .unwrap_or(vec![])))
 	.collect()
 }
 
 
-pub fn case_dates() -> NaiveDateRange {
+pub fn cases_muni_dates() -> NaiveDateRange {
     NaiveDateRange(NaiveDate::from_ymd(2020, 3, 31), None)
 }
 
 
-fn cases_per_day(cache_path: &Path, date: NaiveDate) -> Result<Option<Vec<Cases>>> {
+fn cases_muni_per_day(cache_path: &Path, date: NaiveDate)
+		      -> Result<Option<Vec<CasesMuni>>> {
 
     let cache_path = cache_path.join("sciensano/cases");
     let cache_file = cache_path.join(format!(
@@ -101,15 +114,33 @@ fn cases_per_day(cache_path: &Path, date: NaiveDate) -> Result<Option<Vec<Cases>
 	}
     }
 
-    let data = download_cases_per_day(date)?;
+    let data = download_cases_muni_per_day(date)?;
     fs::create_dir_all(&cache_path)?;
     serde_json::to_writer(io::BufWriter::new(File::create(cache_file)?), &data)?;
     Ok(data)
 
 }
 
+pub fn cases_agesex(cache_path: &Path) -> Result<Vec<CasesAgeSex>> {
 
-fn download_cases_per_day(date: NaiveDate) -> Result<Option<Vec<Cases>>> {
+    let cache_path = cache_path.join("sciensano");
+    let cache_file = cache_path.join("COVID19BE_CASES_AGESEX.json");
+
+    if cache_file.exists() {
+	let modified : DateTime<Local> = fs::metadata(&cache_file)?.modified()?.into();
+	if Local::now() - modified < Duration::minutes(30) {
+	    return Ok(serde_json::from_reader(io::BufReader::new(File::open(&cache_file)?))?);
+	}
+    }
+
+    let data = download_cases_agesex()?;
+    fs::create_dir_all(&cache_path)?;
+    serde_json::to_writer(io::BufWriter::new(File::create(cache_file)?), &data)?;
+    Ok(data)
+
+}
+
+fn download_cases_muni_per_day(date: NaiveDate) -> Result<Option<Vec<CasesMuni>>> {
 
     println!("Downloading COVID19BE_CASES_MUNI_CUM_{}.json...",
 	   date.format("%Y%m%d"));
@@ -124,4 +155,10 @@ fn download_cases_per_day(date: NaiveDate) -> Result<Option<Vec<Cases>>> {
 	_ => Err(Error::HttpError(res.status())),
     }
 
+}
+
+
+fn download_cases_agesex() -> Result<Vec<CasesAgeSex>> {
+    println!("Downloading COVID19BE_CASES_AGESEX.json");
+    Ok(reqwest::blocking::get("https://epistat.sciensano.be/Data/COVID19BE_CASES_AGESEX.json")?.json()?)
 }

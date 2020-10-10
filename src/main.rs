@@ -444,16 +444,33 @@ fn sus_test_graphs(graph_path: &Path, smoothings: &Vec<usize>) -> Result<()> {
 	    Err(_) => { println!("Warning: query for {} failed!", estado); None }
 	}).collect();
 
+    let mut summed_data = BTreeMap::new();
+
     for (estado,data) in data.iter() {
+
 	test_graphs(&graph_path, &smoothings, &format!("brazil/estados/{}", unidecode(estado)),
 		    estado, data)?;
+
+	for (date,ent) in data {
+	    let sum = summed_data.entry(date.clone()).or_insert((0.0,0.0));
+	    sum.0 += ent.0;
+	    sum.1 += ent.1;
+	}
+
     }
 
+    let date_range = NaiveDateRange(*summed_data.keys().min().ok_or(Error::MissingData)?,
+				    Some(*summed_data.keys().max().ok_or(Error::MissingData)?));
+    
     test_graphs_regions(&graph_path, &smoothings, "brazil/pais",
 			"Brazil", &data)?;
+    test_graphs(&graph_path, &smoothings, "brazil/pais",
+		"Brazil", &date_range.map(
+		    |date| (date.clone(), summed_data.remove(&date).unwrap_or((0.0,0.0)))
+		).collect())?;
 
     Ok(())
-    
+
 }
 
 fn case_graphs(graph_path: &Path, smoothings: &Vec<usize>, group: &str, level: &str,

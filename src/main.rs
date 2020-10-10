@@ -344,32 +344,59 @@ fn sciensano_hospitalization_graphs(graph_path: &Path, cache_path: &Path, smooth
 
 fn sciensano_test_graphs(graph_path: &Path, cache_path: &Path, smoothings: &Vec<usize>) -> Result<()> {
 
-    let case_data = sciensano::cases_agesex(&cache_path)?;
-    let test_data = sciensano::tests(&cache_path)?;
-    let mut data = BTreeMap::new();
+    let data = sciensano::tests(&cache_path)?;
+    let mut by_province = BTreeMap::new();
+    let mut by_region = BTreeMap::new();
+    let mut by_country = BTreeMap::new();
     
-    for row in &case_data {
+    for row in &data {
 	let date = NaiveDate::parse_from_str(row.date.as_ref().map(|d| d.as_str())
 					     .unwrap_or("2020-02-29"), "%Y-%m-%d")?;
-	let (cases,_) = data.entry(date).or_insert((0.0,0.0));
-	*cases += row.cases as f64;
+	if let Some(province) = row.province.clone() {
+	    let ent = by_province.entry(province.clone()).or_insert_with(BTreeMap::new)
+		.entry(date).or_insert((0.0,0.0));
+	    ent.0 += row.tests_all_pos as f64;
+	    ent.1 += row.tests_all as f64;
+	}
+	if let Some(region) = row.region.as_ref() {
+	    let ent = by_region.entry(region.clone()).or_insert_with(BTreeMap::new)
+		.entry(date).or_insert((0.0,0.0));
+	    ent.0 += row.tests_all_pos as f64;
+	    ent.1 += row.tests_all as f64;
+	}
+	let ent = by_country.entry(date).or_insert((0.0,0.0));
+	ent.0 += row.tests_all_pos as f64;
+	ent.1 += row.tests_all as f64;
     }
 
-    for row in &test_data {
-	let date = NaiveDate::parse_from_str(row.date.as_ref().map(|d| d.as_str())
-					     .unwrap_or("2020-02-29"), "%Y-%m-%d")?;
-	let (_,tests) = data.entry(date).or_insert((0.0,0.0));
-	*tests += row.tests as f64;
+    let date_range = NaiveDateRange(*by_country.keys().min().ok_or(Error::MissingData)?,
+				    Some(*by_country.keys().max().ok_or(Error::MissingData)?));
+
+    let groups : Vec<(&str,Vec<(String,_)>)> = vec![
+	("region", by_region.into_iter().map(
+	    |(key,mut series)| (key, date_range.clone().map(
+		|date| (date, series.remove(&date).unwrap_or((0.0,0.0)))
+	    ).collect())
+	).collect()),
+	("province", by_province.into_iter().map(
+	    |(key,mut series)| (key, date_range.clone().map(
+		|date| (date, series.remove(&date).unwrap_or((0.0,0.0)))
+	    ).collect())
+	).collect())
+    ];
+
+    test_graphs(&graph_path, &smoothings, "belgium/tests/country", "Belgium",
+		&date_range.clone().map(
+		    |date| (date.clone(), by_country.remove(&date).unwrap_or((0.0,0.0)))
+		).collect())?;
+
+    for (group,regions) in groups {
+	test_graphs_regions(&graph_path, &smoothings,
+			    &format!("belgium/tests/{}", group),
+			    group, &regions)?;
     }
 
-    let date_range = NaiveDateRange(*data.keys().min().ok_or(Error::MissingData)?,
-				    Some(*data.keys().max().ok_or(Error::MissingData)?));
-
-    test_graphs(&graph_path, &smoothings, "belgium/tests", "Belgium",
-		&date_range.map(
-		    |date| (date,data.remove(&date)
-			    .unwrap_or((0.0,0.0)))
-		).collect())
+    Ok(())
 
 }
 
@@ -412,6 +439,23 @@ fn test_graphs(graph_path: &Path, smoothings: &Vec<usize>,
     for smoothing in smoothings {
 	graph::tests_graph(graph_path, group, region, *smoothing,
 			   &average_tests(data, *smoothing))?;
+    }
+
+    Ok(())
+
+}
+
+fn test_graphs_regions(graph_path: &Path, smoothings: &Vec<usize>, group: &str,
+		       level: &str, data: &Vec<(String,TestsData)>) -> Result<()> {
+
+    for smoothing in smoothings {
+	let averaged_data = data.iter().map(
+	    |(region,data)| (region.clone(), average_tests(data, *smoothing))
+	).collect();
+	graph::test_positivity_graph(graph_path, group, level, *smoothing,
+				     &averaged_data)?;
+	graph::total_tests_graph(graph_path, group, level, *smoothing,
+				 &averaged_data)?;
     }
 
     Ok(())

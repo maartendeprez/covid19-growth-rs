@@ -72,6 +72,46 @@ pub fn tests_graph(graph_path: &Path, group: &str, region: &str,
     graph_tests(&graph_path, &filename, &title, data)
 }
 
+pub fn test_positivity_graph(graph_path: &Path, group: &str, level: &str,
+			smoothing: usize, data: &Vec<(String,TestsData)>) -> Result<()> {
+    let graph_path = graph_path.join(group);
+    let filename = match smoothing {
+	1 => format!("positive-tests.html"),
+	n => format!("positive-tests-{}days.html", n),
+    };
+    let title = match smoothing {
+	1 => format!("Evolution of COVID-19 test positivity ratio by {}", level),
+	n => format!("{}-day averaged evolution of COVID-19 \
+		      test positivity ratio by {}", n, level)
+    };
+    graph(&graph_path, &filename, &title, "Proportion of positive tests",
+	  &json!({"domain":[0.0, 1.0]}), &vec![], &data.iter().map(
+	      |(region,series)| (region.clone(), series.iter().map(
+		  |(date,(pos,all))| (date.clone(), pos / all)
+	      ).collect())
+	  ).collect())
+}
+
+pub fn total_tests_graph(graph_path: &Path, group: &str, level: &str,
+			 smoothing: usize, data: &Vec<(String,TestsData)>) -> Result<()> {
+    let graph_path = graph_path.join(group);
+    let filename = match smoothing {
+	1 => format!("total-tests.html"),
+	n => format!("total-tests-{}days.html", n),
+    };
+    let title = match smoothing {
+	1 => format!("Evolution of COVID-19 test count by {}", level),
+	n => format!("{}-day averaged evolution of COVID-19 \
+		      test count by {}", n, level)
+    };
+    graph(&graph_path, &filename, &title, "Number of tests",
+	  &json!({}), &vec![], &data.iter().map(
+	      |(region,series)| (region.clone(), series.iter().map(
+		  |(date,(_pos,all))| (date.clone(), *all)
+	      ).collect())
+	  ).collect())
+}
+
 
 fn graph(graph_path: &Path, path: &str, title: &str, ytitle: &str, scale: &Value,
 	 refs: &Vec<f64>, data: &CasesData) -> Result<()> {

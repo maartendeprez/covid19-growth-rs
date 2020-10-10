@@ -10,55 +10,71 @@ use super::error::Result;
 
 
 pub type Series = Vec<(NaiveDate,f64)>;
-pub type GraphData = Vec<(String,Series)>;
+pub type CasesData = Vec<(String,Series)>;
+pub type TestsData = Vec<(NaiveDate,(f64,f64))>;
 
 
-pub fn cases_graph(graph_path: &Path, group: &str, level: &str,
-		   data: &GraphData) -> Result<()> {
+pub fn cases_graph(graph_path: &Path, group: &str, level: &str, var: &str,
+		   scale: &Value, refs: &Vec<f64>, data: &CasesData) -> Result<()> {
     let graph_path = graph_path.join(group);
     graph(&graph_path, "absolute.html",
-	  &format!("Number of total confirmed COVID-19 cases by {}", level),
-	  "Count", json!({"type":"log"}), vec![], data)
+	  &format!("Number of total {} by {}", var, level),
+	  "Count", scale, refs, data)
 }
 
 
-pub fn daily_graph(graph_path: &Path, group: &str, level: &str,
-		   smoothing: usize, data: &GraphData) -> Result<()> {
+pub fn daily_graph(graph_path: &Path, group: &str, level: &str, var: &str, refs: &Vec<f64>,
+		   smoothing: usize, data: &CasesData) -> Result<()> {
     let graph_path = graph_path.join(group);
     let filename = match smoothing {
 	1 => format!("daily.html"),
 	n => format!("daily-{}days.html", n),
     };
     let title = match smoothing {
-	1 => format!("Number of daily confirmed COVID-19 \
-		      cases by {}",  level),
-	n => format!("{}-day average number of daily confirmed COVID-19 \
-		      cases by {}", n, level),
+	1 => format!("Number of daily {} by {}", var, level),
+	n => format!("{}-day average number of daily {} by {}",
+		     n, var, level),
     };
     graph(&graph_path, &filename, &title, "Count",
-	  json!({}), vec![], data)
+	  &json!({}), refs, data)
 }
 
 
 pub fn growth_graph(graph_path: &Path, group: &str, level: &str,
-		    smoothing: usize, data: &GraphData) -> Result<()> {
+		    var: &str, smoothing: usize, data: &CasesData) -> Result<()> {
     let graph_path = graph_path.join(group);
     let filename = match smoothing {
 	1 => format!("growth.html"),
 	n => format!("growth-{}days.html", n),
     };
     let title = match smoothing {
-	1 => format!("Daily growth of confirmed COVID-19 cases by {}", level),
-	n => format!("Average daily growth of {}-day average confirmed \
-		      COVID-19 cases by {}", n, level)
+	1 => format!("Daily growth of {} by {}", var, level),
+	n => format!("Average daily growth of {}-day average {} by {}",
+		     n, var, level)
     };
     graph(&graph_path, &filename, &title, "Factor",
-	  json!({"domain":[0.5, 1.5]}), vec![1.0], data)
+	  &json!({"domain":[0.5, 1.5]}), &vec![1.0], data)
 }
 
 
-fn graph(graph_path: &Path, path: &str, title: &str, ytitle: &str, scale: Value,
-	 refs: Vec<f64>, data: &Vec<(String,Vec<(NaiveDate,f64)>)>) -> Result<()> {
+pub fn tests_graph(graph_path: &Path, group: &str, region: &str,
+		   smoothing: usize, data: &TestsData) -> Result<()> {
+    let graph_path = graph_path.join(group);
+    let filename = match smoothing {
+	1 => format!("tests.html"),
+	n => format!("tests-{}days.html", n),
+    };
+    let title = match smoothing {
+	1 => format!("Evolution of COVID-19 test results ({})", region),
+	n => format!("{}-day averaged evolution of COVID-19 \
+		      test results ({})", n, region)
+    };
+    graph_tests(&graph_path, &filename, &title, data)
+}
+
+
+fn graph(graph_path: &Path, path: &str, title: &str, ytitle: &str, scale: &Value,
+	 refs: &Vec<f64>, data: &CasesData) -> Result<()> {
 
     fs::create_dir_all(graph_path)?;
     let mut out = io::BufWriter::new(File::create(graph_path.join(path))?);
@@ -66,7 +82,7 @@ fn graph(graph_path: &Path, path: &str, title: &str, ytitle: &str, scale: Value,
     write!(out, "<!DOCTYPE html><html><head>")?;
     write!(out, "<meta charset=\"UTF-8\">")?;
     write!(out, "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">")?;
-    write!(out, "<title>COVID-19 Growth of CASES</title>")?;
+    write!(out, "<title>{}</title>", title)?;
     write!(out, "<script src=\"https://cdn.jsdelivr.net/npm/vega@5\"></script>")?;
     write!(out, "<script src=\"https://cdn.jsdelivr.net/npm/vega-lite@4\"></script>")?;
     write!(out, "<script src=\"https://cdn.jsdelivr.net/npm/vega-embed\"></script>")?;
@@ -84,7 +100,7 @@ fn graph(graph_path: &Path, path: &str, title: &str, ytitle: &str, scale: Value,
 	"data": {
 	    "values": data.iter().flat_map(
 		|(region,vals)| vals.iter().filter_map(
-		    move |(date,val)| match val.is_normal() || *val == 0.0 {
+		    move |(date,val)| match val.is_normal() {
 			false => None,
 			true => Some(json!({
 			    "Date": format!("{}", date.format("%Y-%m-%d")),
@@ -198,6 +214,154 @@ fn graph(graph_path: &Path, path: &str, title: &str, ytitle: &str, scale: Value,
 			"type":"quantitative"
 		    }
 		}
+	    }
+	]
+    }))?;
+
+    write!(out, ";vegaEmbed('#vis', spec,{{}}).then(function(result) {{")?;
+    write!(out, "}}).catch(console.error);")?;
+    write!(out, "</script>")?;
+    write!(out, "</body></html>")?;
+
+    Ok(())
+
+}
+
+
+fn graph_tests(graph_path: &Path, path: &str, title: &str,
+	       data: &TestsData) -> Result<()> {
+
+    fs::create_dir_all(graph_path)?;
+    let mut out = io::BufWriter::new(File::create(graph_path.join(path))?);
+
+    write!(out, "<!DOCTYPE html><html><head>")?; 
+    write!(out, "<meta charset=\"UTF-8\">")?;
+    write!(out, "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">")?;
+    write!(out, "<title>{}</title>", title)?;
+    write!(out, "<script src=\"https://cdn.jsdelivr.net/npm/vega@5\"></script>")?;
+    write!(out, "<script src=\"https://cdn.jsdelivr.net/npm/vega-lite@4\"></script>")?;
+    write!(out, "<script src=\"https://cdn.jsdelivr.net/npm/vega-embed\"></script>")?;
+    write!(out, "</head>")?;
+    write!(out, "<body>")?;
+    write!(out, "<div id=\"vis\" style=\"overflow: hidden; position: absolute;top: 0; left: 0; right: 0; bottom: 0;\"></div>")?;
+    write!(out, "<script type=\"text/javascript\">")?;
+    write!(out, "var spec = ")?;
+
+    serde_json::to_writer_pretty(out.by_ref(), &json!({
+	"height": "container",
+	"width": "container",
+	"$schema": "https://vega.github.io/schema/vega-lite/v4.json",
+	"title": title,
+	"layer": [
+	    {
+		"data": {
+		    "values": data.iter().filter_map(
+			|(date,(cases,tests))| match *tests == 0.0 {
+			    true => None,
+			    false => Some(json!({
+				"Date": format!("{}", date.format("%Y-%m-%d")),
+				"Total": tests,
+				"Positive": 1f64.min(cases / tests)
+			    }))
+			}
+		    ).collect::<Vec<_>>(),
+		},
+		"encoding": {
+		    "x": {
+			"field": "Date",
+			"timeUnit": "utcyearmonthdate",
+			"title": "Date",
+			"type": "temporal"
+		    }
+		},
+		"resolve": {
+		    "scale": {
+			"y": "independent"
+		    }
+		},
+		"layer": [
+		    {
+			"mark": {
+			    "color": "red",
+			    "type": "line"
+			},
+			"selection": {
+			    "Grid1": {"bind":"scales","type":"interval"}
+			},
+			"encoding": {
+			    "y": {
+				"field": "Positive",
+				"scale": {
+				    "domain": [
+					0,
+					1
+				    ],
+				    "type": "linear"
+				},
+				"type": "quantitative",
+				"axis": {
+				    "titleColor": "red",
+				    "title": "Proportion of positive tests"
+				}
+			    }
+			}
+		    },
+		    {
+			"mark": {
+			    "color": "blue",
+			    "type": "line"
+			},
+			"selection": {
+			    "Grid2": {"bind":"scales","type":"interval"}
+			},
+			"encoding": {
+			    "y": {
+				"field": "Total",
+				"scale": {
+				    "type": "linear",
+				    "domainMin": 0
+				},
+				"type": "quantitative",
+				"axis": {
+				    "titleColor": "blue",
+				    "title": "Total number of tests"
+				}
+			    }
+			}
+		    },
+		    {
+			"mark": {
+			    "color": "gray",
+			    "type": "rule"
+			},
+			"selection": {
+			    "Hover": {
+				"nearest":true,
+				"empty":"none",
+				"clear":"mouseout",
+				"type":"single",
+				"on":"mouseover",
+				"fields":["Date"]
+			    }
+			},
+			"encoding": {
+			    "opacity": {
+				"value": 0,
+				"condition": {
+				    "value": 1,
+				    "selection": "Hover"
+				}
+			    },
+			    "tooltip": [
+				{"field": "Date", "type": "temporal"},
+				{"field": "Total", "type": "quantitative",
+				 "format": ".0f"},
+				{"field": "Positive", "type": "quantitative",
+				 "format": ".3f"}
+			    ]
+			}
+		    }
+		]
 	    }
 	]
     }))?;

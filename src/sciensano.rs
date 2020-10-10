@@ -2,7 +2,7 @@ use std::{io,fs};
 use std::fs::File;
 use std::path::Path;
 
-use serde::{Serialize,Deserialize};
+use serde::{Serialize,Deserialize,de::DeserializeOwned};
 use chrono::{DateTime,Local,Duration};
 use chrono::naive::NaiveDate;
 use encoding_rs::mem::decode_latin1;
@@ -30,6 +30,31 @@ pub struct CasesAgeSex {
     pub agegroup: Option<String>,
     pub sex: Option<String>,
     pub cases: u64
+}
+
+#[derive(Serialize,Deserialize,Debug)]
+#[serde(rename_all = "UPPERCASE")]
+pub struct Hospitalizations {
+    pub date: Option<String>,
+    pub province: Option<String>,
+    pub region: Option<String>,
+    pub nr_reporting: u64,
+    pub total_in: u64,
+    pub total_in_icu: u64,
+    pub total_in_resp: u64,
+    pub total_in_ecmo: u64,
+    pub new_in: u64,
+    pub new_out: u64,
+}
+
+#[derive(Serialize,Deserialize,Debug)]
+#[serde(rename_all = "UPPERCASE")]
+pub struct Tests {
+    pub date: Option<String>,
+    pub province: Option<String>,
+    pub region: Option<String>,
+    pub tests_all: u64,
+    pub tests_all_pos: u64,
 }
 
 pub enum Level {
@@ -84,8 +109,7 @@ where F: for<'r> Fn(&'r CasesMuni) -> bool {
 
 pub fn cases_muni(cache_path: &Path) -> Result<Vec<Vec<CasesMuni>>> {
     NaiveDateRange(NaiveDate::from_ymd(2020, 3, 31),
-		   Some(Local::today().naive_local()
-			- Duration::days(1)))
+		   Some(Local::today().naive_local()))
 	.map(|date| Ok(cases_muni_per_day(cache_path, date)?
 		       .unwrap_or(vec![])))
 	.collect()
@@ -121,24 +145,48 @@ fn cases_muni_per_day(cache_path: &Path, date: NaiveDate)
 
 }
 
+
 pub fn cases_agesex(cache_path: &Path) -> Result<Vec<CasesAgeSex>> {
+    cached("https://epistat.sciensano.be/Data/COVID19BE_CASES_AGESEX.json",
+	   cache_path, "COVID19BE_CASES_AGESEX.json", Duration::minutes(30))
+}
+
+
+pub fn tests(cache_path: &Path) -> Result<Vec<Tests>> {
+    cached("https://epistat.sciensano.be/Data/COVID19BE_tests.json",
+	   cache_path, "COVID19BE_tests.json", Duration::minutes(30))
+}
+
+
+pub fn hospitalizations(cache_path: &Path) -> Result<Vec<Hospitalizations>> {
+    cached("https://epistat.sciensano.be/Data/COVID19BE_HOSP.json",
+	   cache_path, "COVID19BE_HOSP.json", Duration::minutes(30))
+}
+
+
+fn cached<T>(url: &str, cache_path: &Path, filename: &str,
+	     max_age: Duration) -> Result<Vec<T>>
+where T: Serialize + DeserializeOwned {
 
     let cache_path = cache_path.join("sciensano");
-    let cache_file = cache_path.join("COVID19BE_CASES_AGESEX.json");
+    let cache_file = cache_path.join(filename);
 
     if cache_file.exists() {
 	let modified : DateTime<Local> = fs::metadata(&cache_file)?.modified()?.into();
-	if Local::now() - modified < Duration::minutes(30) {
+	if Local::now() - modified < max_age {
 	    return Ok(serde_json::from_reader(io::BufReader::new(File::open(&cache_file)?))?);
 	}
     }
 
-    let data = download_cases_agesex()?;
+    println!("Downloading {}...", filename);
+    let data = reqwest::blocking::get(url)?.json()?;
+
     fs::create_dir_all(&cache_path)?;
     serde_json::to_writer(io::BufWriter::new(File::create(cache_file)?), &data)?;
     Ok(data)
 
 }
+
 
 fn download_cases_muni_per_day(date: NaiveDate) -> Result<Option<Vec<CasesMuni>>> {
 
@@ -155,10 +203,4 @@ fn download_cases_muni_per_day(date: NaiveDate) -> Result<Option<Vec<CasesMuni>>
 	_ => Err(Error::HttpError(res.status())),
     }
 
-}
-
-
-fn download_cases_agesex() -> Result<Vec<CasesAgeSex>> {
-    println!("Downloading COVID19BE_CASES_AGESEX.json");
-    Ok(reqwest::blocking::get("https://epistat.sciensano.be/Data/COVID19BE_CASES_AGESEX.json")?.json()?)
 }

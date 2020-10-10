@@ -8,8 +8,9 @@ use std::path::{PathBuf,Path};
 use std::collections::BTreeMap;
 
 use chrono::naive::NaiveDate;
+use serde_json::json;
 
-use graph::{Series,GraphData};
+use graph::{Series,CasesData,TestsData};
 use error::{Result,Error};
 
 
@@ -21,67 +22,92 @@ fn main() -> Result<()> {
 
     fs::create_dir_all(&graph_path)?;
 
+    if let Err(err) = csse_graphs(&graph_path, &cache_path, &smoothings) {
+	eprintln!("Error: csse graphs: {}", err);
+    }
 
-    /* Graphs from CSSE Data.*/
+    if let Err(err) = sciensano_muni_graphs(&graph_path, &cache_path, &smoothings) {
+	eprintln!("Error: sciensano municipality graphs: {}", err);
+    }
 
-    let groups = vec![("europe", vec![("Italy", vec!["Italy"]),
-				      ("Spain", vec!["Spain"]),
-				      ("Belgium", vec!["Belgium"]),
-				      ("Netherlands", vec!["Netherlands"]),
-				      ("Romania", vec!["Romania"]),
-				      ("Switzerland", vec!["Switzerland"]),
-				      ("Austria", vec!["Austria"]),
-				      ("France", vec!["France"]),
-				      ("Germany", vec!["Germany"]),
-				      ("Sweden", vec!["Sweden"]),
-				      ("Norway", vec!["Norway"]),
-				      ("Finland", vec!["Finland"]),
-				      ("United Kingdom", vec!["United Kingdom"])]),
-		      ("america", vec![("Brazil", vec!["Brazil"]),
-				       ("Chile", vec!["Chile"]),
-				       ("Peru", vec!["Peru"]),
-				       ("Argentina", vec!["Argentina"]),
-				       ("Ecuador", vec!["Ecuador"]),
-				       ("Bolivia", vec!["Bolivia"]),
-				       ("Colombia", vec!["Colombia"]),
-				       ("Mexico", vec!["Mexico"]),
-				       ("US", vec!["US"]),
-				       ("Canada", vec!["Northwest Territories,Canada", "Saskatchewan,Canada",
-						       "Prince Edward Island,Canada", "Alberta,Canada",
-						       "Nova Scotia,Canada", "Yukon,Canada", "British Columbia,Canada",
-						       "Newfoundland and Labrador,Canada", "New Brunswick,Canada",
-						       "Ontario,Canada", "Quebec,Canada", "Manitoba,Canada"])]),
-		      ("africa", vec![("South Africa", vec!["South Africa"]),
-				      ("Congo (Kinshasa)", vec!["Congo (Kinshasa)"]),
-				      ("Ghana", vec!["Ghana"]),
-				      ("Egypt", vec!["Egypt"]),
-				      ("Israel", vec!["Israel"])]),
-		      ("rest", vec![("South Korea", vec!["Korea, South"]),
-				    ("Japan", vec!["Japan"]),
-				    ("Russia", vec!["Russia"]),
-				    ("India", vec!["India"]),
-				    ("China", vec!["Anhui,China", "Xinjiang,China", "Henan,China",
-						   "Shaanxi,China", "Hunan,China", "Jiangxi,China",
-						   "Zhejiang,China", "Shanxi,China", "Tibet,China",
-						   "Shanghai,China", "Macau,China", "Beijing,China",
-						   "Jilin,China", "Tianjin,China", "Fujian,China",
-						   "Guizhou,China", "Heilongjiang,China", "Gansu,China",
-						   "Hainan,China", "Guangdong,China", "Hubei,China",
-						   "Qinghai,China", "Sichuan,China", "Ningxia,China",
-						   "Shandong,China", "Hebei,China", "Inner Mongolia,China",
-						   "Chongqing,China", "Guangxi,China", "Liaoning,China",
-						   "Yunnan,China", "Jiangsu,China", "Hong Kong,China"]),
-				    ("Australia", vec!["South Australia,Australia",
-						       "Australian Capital Territory,Australia",
-						       "New South Wales,Australia",
-						       "Victoria,Australia",
-						       "Western Australia,Australia",
-						       "Queensland,Australia",
-						       "Northern Territory,Australia",
-						       "Tasmania,Australia"]),
-				    ("Iran", vec!["Iran"]),
-				    ("Iraq", vec!["Iraq"]),
-				    ("Turkey", vec!["Turkey"])])];
+    if let Err(err) = sciensano_agesex_graphs(&graph_path, &cache_path, &smoothings) {
+	eprintln!("Error: sciensano agesex graphs: {}", err);
+    }
+
+    if let Err(err) = sciensano_hospitalization_graphs(&graph_path, &cache_path, &smoothings) {
+	eprintln!("Error: sciensano hospitalization graphs: {}", err);
+    }
+    
+    if let Err(err) = sciensano_test_graphs(&graph_path, &cache_path, &smoothings) {
+	eprintln!("Error: sciensano test graphs: {}", err);
+    }
+
+    Ok(())
+    
+}
+
+
+fn csse_graphs(graph_path: &Path, cache_path: &Path, smoothings: &Vec<usize>) -> Result<()> {
+
+    let groups = vec![
+	("europe", vec![("Italy", vec!["Italy"]),
+			("Spain", vec!["Spain"]),
+			("Belgium", vec!["Belgium"]),
+			("Netherlands", vec!["Netherlands"]),
+			("Romania", vec!["Romania"]),
+			("Switzerland", vec!["Switzerland"]),
+			("Austria", vec!["Austria"]),
+			("France", vec!["France"]),
+			("Germany", vec!["Germany"]),
+			("Sweden", vec!["Sweden"]),
+			("Norway", vec!["Norway"]),
+			("Finland", vec!["Finland"]),
+			("United Kingdom", vec!["United Kingdom"])]),
+	("america", vec![("Brazil", vec!["Brazil"]),
+			 ("Chile", vec!["Chile"]),
+			 ("Peru", vec!["Peru"]),
+			 ("Argentina", vec!["Argentina"]),
+			 ("Ecuador", vec!["Ecuador"]),
+			 ("Bolivia", vec!["Bolivia"]),
+			 ("Colombia", vec!["Colombia"]),
+			 ("Mexico", vec!["Mexico"]),
+			 ("US", vec!["US"]),
+			 ("Canada", vec!["Northwest Territories,Canada", "Saskatchewan,Canada",
+					 "Prince Edward Island,Canada", "Alberta,Canada",
+					 "Nova Scotia,Canada", "Yukon,Canada", "British Columbia,Canada",
+					 "Newfoundland and Labrador,Canada", "New Brunswick,Canada",
+					 "Ontario,Canada", "Quebec,Canada", "Manitoba,Canada"])]),
+	("africa", vec![("South Africa", vec!["South Africa"]),
+			("Congo (Kinshasa)", vec!["Congo (Kinshasa)"]),
+			("Ghana", vec!["Ghana"]),
+			("Egypt", vec!["Egypt"]),
+			("Israel", vec!["Israel"])]),
+	("rest", vec![("South Korea", vec!["Korea, South"]),
+		      ("Japan", vec!["Japan"]),
+		      ("Russia", vec!["Russia"]),
+		      ("India", vec!["India"]),
+		      ("China", vec!["Anhui,China", "Xinjiang,China", "Henan,China",
+				     "Shaanxi,China", "Hunan,China", "Jiangxi,China",
+				     "Zhejiang,China", "Shanxi,China", "Tibet,China",
+				     "Shanghai,China", "Macau,China", "Beijing,China",
+				     "Jilin,China", "Tianjin,China", "Fujian,China",
+				     "Guizhou,China", "Heilongjiang,China", "Gansu,China",
+				     "Hainan,China", "Guangdong,China", "Hubei,China",
+				     "Qinghai,China", "Sichuan,China", "Ningxia,China",
+				     "Shandong,China", "Hebei,China", "Inner Mongolia,China",
+				     "Chongqing,China", "Guangxi,China", "Liaoning,China",
+				     "Yunnan,China", "Jiangsu,China", "Hong Kong,China"]),
+		      ("Australia", vec!["South Australia,Australia",
+					 "Australian Capital Territory,Australia",
+					 "New South Wales,Australia",
+					 "Victoria,Australia",
+					 "Western Australia,Australia",
+					 "Queensland,Australia",
+					 "Northern Territory,Australia",
+					 "Tasmania,Australia"]),
+		      ("Iran", vec!["Iran"]),
+		      ("Iraq", vec!["Iraq"]),
+		      ("Turkey", vec!["Turkey"])])];
 
     let data = csse::confirmed(&cache_path)?;
 
@@ -89,30 +115,29 @@ fn main() -> Result<()> {
 
 	regions.sort();
 
-	graphs(&graph_path, &smoothings,
-	       &format!("csse/{}", group), "country",
-	       &regions.iter().map(
-		   |(region,keys)| Ok((region.to_string(), sum_series(&keys.iter().map(
-		       |key| data.get(*key).ok_or(Error::MissingRegion(*key))
-		   ).collect::<Result<_>>()?)))
-	       ).collect::<Result<_>>()?)?;
+	case_graphs(graph_path, smoothings,
+		    &format!("csse/{}", group), "country", "confirmed COVID-19 cases",
+		    &regions.iter().map(
+			|(region,keys)| Ok((region.to_string(), sum_series(&keys.iter().map(
+			    |key| data.get(*key).ok_or(Error::MissingRegion(*key))
+			).collect::<Result<_>>()?)))
+		    ).collect::<Result<_>>()?)?;
 
     }
 
-    
-    /* Graphs from Sciensano municipality data. */
+    Ok(())
+
+}
+
+
+fn sciensano_muni_graphs(graph_path: &Path, cache_path: &Path, smoothings: &Vec<usize>) -> Result<()> {
 
     let belgium = vec![
 	(sciensano::Level::Municipality, vec![
 	    "Scherpenheuvel-Zichem", "Holsbeek", "Aarschot", "Kortrijk", "Herselt",
 	    "Wervik", "Leuven", "Brussel", "Mechelen", "Antwerpen", "Gent", "Tienen",
 	    "Hasselt", "Sint-Truiden", "Westerlo", "Heist-op-den-Berg"
-	]) /*,
-	(sciensano::Level::Province, vec![
-	    "Vlaams-Brabant", "Antwerpen", "Limburg", "West-Vlaanderen", "Oost-Vlaanderen",
-	    "Waals-Brabant", "Namen", "Luik", "Henegouwen", "Luxemburg"
-	]),
-	(sciensano::Level::Country, vec!["Belgium"]) */
+	])
     ];
 
     let data = sciensano::cases_muni(&cache_path)?;
@@ -121,23 +146,29 @@ fn main() -> Result<()> {
 
 	regions.sort();
 
-	graphs(&graph_path, &smoothings,
-	       &format!("belgium/{}", level.name()), level.name(),
-	       &regions.iter().map(|region| {
-		   let series = sciensano::cases_muni_series(&data, |cs| level.filter_muni(region, cs));
-		   (region.to_string(), sciensano::cases_muni_dates().zip(interpolate(series)).collect())
-	       }).collect())?;
+	case_graphs(&graph_path, &smoothings,
+		    &format!("belgium/cases/{}", level.name()), level.name(),
+		    "confirmed COVID-19 cases",
+		    &regions.iter().map(|region| {
+			let series = sciensano::cases_muni_series(&data, |cs| level.filter_muni(region, cs));
+			(region.to_string(), sciensano::cases_muni_dates().zip(interpolate(series)).collect())
+		    }).collect())?;
 
     }
 
+    Ok(())
 
-    /* Graphs from Sciensano agesex data. */
+}
+
+
+fn sciensano_agesex_graphs(graph_path: &Path, cache_path: &Path, smoothings: &Vec<usize>) -> Result<()> {
 
     let data = sciensano::cases_agesex(&cache_path)?;
 
     let mut by_province = BTreeMap::new();
     let mut by_region = BTreeMap::new();
     let mut by_country = BTreeMap::new();
+    let mut by_agegroup = BTreeMap::new();
 
     for row in &data {
 	let date = NaiveDate::parse_from_str(row.date.as_ref().map(|d| d.as_str())
@@ -148,6 +179,10 @@ fn main() -> Result<()> {
 	}
 	if let Some(region) = row.region.clone() {
 	    *by_region.entry(region).or_insert_with(BTreeMap::new)
+		.entry(date).or_insert(0.0) += row.cases as f64;
+	}
+	if let Some(agegroup) = row.agegroup.clone() {
+	    *by_agegroup.entry(agegroup).or_insert_with(BTreeMap::new)
 		.entry(date).or_insert(0.0) += row.cases as f64;
 	}
 	*by_country.entry(date).or_insert(0.0) += row.cases as f64;
@@ -168,32 +203,219 @@ fn main() -> Result<()> {
 	    |(key,mut series)| (key, date_range.clone().scan(
 		0.0, |sum,date| { *sum += series.remove(&date).unwrap_or(0.0);
 				   Some((date, *sum)) }).collect())
+	).collect()),
+	("age", by_agegroup.into_iter().map(
+	    |(key,mut series)| (key, date_range.clone().scan(
+		0.0, |sum,date| { *sum += series.remove(&date).unwrap_or(0.0);
+				   Some((date, *sum)) }).collect())
 	).collect())
     ];
 
     for (group,regions) in groups {
 	//regions.sort();
-	graphs(&graph_path, &smoothings,
-	       &format!("belgium/{}", group), group,
-	       &regions)?;
+	case_graphs(&graph_path, &smoothings,
+		    &format!("belgium/cases/{}", group),
+		    group, "confirmed COVID-19 cases",
+		    &regions)?;
     }
 
     Ok(())
 
 }
 
-fn graphs(graph_path: &Path, smoothings: &Vec<usize>,
-	  group: &str, level: &str, data: &GraphData) -> Result<()> {
-    graph::cases_graph(graph_path, group, level, &data)?;
+
+fn sciensano_hospitalization_graphs(graph_path: &Path, cache_path: &Path, smoothings: &Vec<usize>) -> Result<()> {
+
+    let data = sciensano::hospitalizations(&cache_path)?;
+
+    let mut hosp_in_by_province = BTreeMap::new();
+    let mut hosp_in_by_region = BTreeMap::new();
+    let mut hosp_in_by_country = BTreeMap::new();
+    let mut hosp_by_province = BTreeMap::new();
+    let mut hosp_by_region = BTreeMap::new();
+    let mut hosp_by_country = BTreeMap::new();
+    let mut icu_by_province = BTreeMap::new();
+    let mut icu_by_region = BTreeMap::new();
+    let mut icu_by_country = BTreeMap::new();
+
+    for row in &data {
+
+	let date = NaiveDate::parse_from_str(row.date.as_ref().map(|d| d.as_str())
+					     .unwrap_or("2020-02-29"), "%Y-%m-%d")?;
+
+	if let Some(province) = row.province.clone() {
+	    *hosp_in_by_province.entry(province.clone()).or_insert_with(BTreeMap::new)
+		.entry(date).or_insert(0.0) += row.new_in as f64;
+	    *hosp_by_province.entry(province.clone()).or_insert_with(BTreeMap::new)
+		.entry(date).or_insert(0.0) += row.total_in as f64;
+	    *icu_by_province.entry(province).or_insert_with(BTreeMap::new)
+		.entry(date).or_insert(0.0) += row.total_in_icu as f64;
+	}
+
+	if let Some(region) = row.region.clone() {
+	    *hosp_in_by_region.entry(region.clone()).or_insert_with(BTreeMap::new)
+		.entry(date).or_insert(0.0) += row.new_in as f64;
+	    *hosp_by_region.entry(region.clone()).or_insert_with(BTreeMap::new)
+		.entry(date).or_insert(0.0) += row.total_in as f64;
+	    *icu_by_region.entry(region).or_insert_with(BTreeMap::new)
+		.entry(date).or_insert(0.0) += row.total_in_icu as f64;
+	}
+
+	*hosp_in_by_country.entry(date).or_insert(0.0) += row.new_in as f64;
+	*hosp_by_country.entry(date).or_insert(0.0) += row.total_in as f64;
+	*icu_by_country.entry(date).or_insert(0.0) += row.total_in_icu as f64;
+
+    }
+
+    let date_range = NaiveDateRange(*hosp_by_country.keys().min().ok_or(Error::MissingData)?,
+				    Some(*hosp_by_country.keys().max().ok_or(Error::MissingData)?));
+
+    let hosp_in_groups = vec![
+	("country", vec![("Belgium".to_string(), date_range.clone().map(
+	    |date| (date, hosp_in_by_country.remove(&date).unwrap_or(0.0))
+	).collect())]),
+	("province", hosp_in_by_province.into_iter().map(
+	    |(key,mut series)| (key, date_range.clone().map(
+		|date| (date, series.remove(&date).unwrap_or(0.0))
+	    ).collect())
+	).collect()),
+	("region", hosp_in_by_region.into_iter().map(
+	    |(key,mut series)| (key, date_range.clone().map(
+		|date| (date, series.remove(&date).unwrap_or(0.0))
+	    ).collect())
+	).collect())
+    ];
+
+    let hosp_groups = vec![
+	("country", vec![("Belgium".to_string(), date_range.clone().map(
+	    |date| (date, hosp_by_country.remove(&date).unwrap_or(0.0))
+	).collect())]),
+	("province", hosp_by_province.into_iter().map(
+	    |(key,mut series)| (key, date_range.clone().map(
+		|date| (date, series.remove(&date).unwrap_or(0.0))
+	    ).collect())
+	).collect()),
+	("region", hosp_by_region.into_iter().map(
+	    |(key,mut series)| (key, date_range.clone().map(
+		|date| (date, series.remove(&date).unwrap_or(0.0))
+	    ).collect())
+	).collect())
+    ];
+
+    let icu_groups = vec![
+	("country", vec![("Belgium".to_string(), date_range.clone().map(
+	    |date| (date, icu_by_country.remove(&date).unwrap_or(0.0))
+	).collect())]),
+	("province", icu_by_province.into_iter().map(
+	    |(key,mut series)| (key, date_range.clone().map(
+		|date| (date, series.remove(&date).unwrap_or(0.0))
+	    ).collect())
+	).collect()),
+	("region", icu_by_region.into_iter().map(
+	    |(key,mut series)| (key, date_range.clone().map(
+		|date| (date, series.remove(&date).unwrap_or(0.0))
+	    ).collect())
+	).collect())
+    ];
+
+    for (group,regions) in hosp_in_groups {
+	case_graphs(&graph_path, &smoothings,
+		    &format!("belgium/hospitalizations-in/{}", group),
+		    group, "COVID-19 hospitalizations in", &regions.iter().map(
+			|(k,v)| (k.clone(), cumsum(v))
+		    ).collect())?;
+    }
+
+    for (group,regions) in hosp_groups {
+	active_graphs(&graph_path, &smoothings,
+		      &format!("belgium/hospitalizations/{}", group),
+		      group, "COVID-19 hospitalizations net", &regions)?;
+    }
+
+    for (group,regions) in icu_groups {
+	active_graphs(&graph_path, &smoothings,
+		      &format!("belgium/hospitalizations-icu/{}", group),
+		      group, "COVID-19 patients in icu", &regions)?;
+    }
+
+    Ok(())
+
+}
+
+fn sciensano_test_graphs(graph_path: &Path, cache_path: &Path, smoothings: &Vec<usize>) -> Result<()> {
+
+    let case_data = sciensano::cases_agesex(&cache_path)?;
+    let test_data = sciensano::tests(&cache_path)?;
+    let mut data = BTreeMap::new();
+    
+    for row in &case_data {
+	let date = NaiveDate::parse_from_str(row.date.as_ref().map(|d| d.as_str())
+					     .unwrap_or("2020-02-29"), "%Y-%m-%d")?;
+	let (cases,_) = data.entry(date).or_insert((0.0,0.0));
+	*cases += row.cases as f64;
+    }
+
+    for row in &test_data {
+	let date = NaiveDate::parse_from_str(row.date.as_ref().map(|d| d.as_str())
+					     .unwrap_or("2020-02-29"), "%Y-%m-%d")?;
+	let (_,tests) = data.entry(date).or_insert((0.0,0.0));
+	*tests += row.tests as f64;
+    }
+
+    let date_range = NaiveDateRange(*data.keys().min().ok_or(Error::MissingData)?,
+				    Some(*data.keys().max().ok_or(Error::MissingData)?));
+
+    test_graphs(&graph_path, &smoothings, "belgium/tests", "Belgium",
+		&date_range.map(
+		    |date| (date,data.remove(&date)
+			    .unwrap_or((0.0,0.0)))
+		).collect())
+
+}
+
+
+fn case_graphs(graph_path: &Path, smoothings: &Vec<usize>, group: &str, level: &str,
+	       var: &str, data: &CasesData) -> Result<()> {
+    graph::cases_graph(graph_path, group, level, var, &json!({"type":"log"}), &vec![], &data)?;
     for smoothing in smoothings {
-	graph::daily_graph(graph_path, group, level, *smoothing, &data.iter().map(
+	graph::daily_graph(graph_path, group, level, var, &vec![], *smoothing, &data.iter().map(
 	    |(region,series)| (region.clone(), average(&daily(series), *smoothing))
 	).collect())?;
-	graph::growth_graph(graph_path, group, level, *smoothing, &data.iter().map(
-	    |(region,series)| (region.clone(), growths(&average(&daily(series), *smoothing), *smoothing))
-	).collect())?;
+	if *smoothing != 1 {
+	    graph::growth_graph(graph_path, group, level, var, *smoothing, &data.iter().map(
+		|(region,series)| (region.clone(), growths(&average(&daily(series), *smoothing), *smoothing))
+	    ).collect())?;
+	}
     }
     Ok(())
+}
+
+fn active_graphs(graph_path: &Path, smoothings: &Vec<usize>, group: &str, level: &str,
+		 var: &str, data: &CasesData) -> Result<()> {
+    graph::cases_graph(graph_path, group, level, var, &json!({}), &vec![0.0], &data)?;
+    for smoothing in smoothings {
+	graph::daily_graph(graph_path, group, level, var, &vec![0.0], *smoothing, &data.iter().map(
+	    |(region,series)| (region.clone(), average(&daily(series), *smoothing))
+	).collect())?;
+	if *smoothing != 1 {
+	    graph::growth_graph(graph_path, group, level, var, *smoothing, &data.iter().map(
+		|(region,series)| (region.clone(), growths(&average(series, *smoothing), *smoothing))
+	    ).collect())?;
+	}
+    }
+    Ok(())
+}
+
+fn test_graphs(graph_path: &Path, smoothings: &Vec<usize>,
+	       group: &str, region: &str, data: &TestsData) -> Result<()> {
+
+    for smoothing in smoothings {
+	graph::tests_graph(graph_path, group, region, *smoothing,
+			   &average_tests(data, *smoothing))?;
+    }
+
+    Ok(())
+
 }
 
 
@@ -222,6 +444,13 @@ fn interpolate(series: Vec<Option<u64>>) -> Vec<f64> {
 
 }
 
+fn cumsum(data: &Series) -> Series {
+    let mut sum = 0.0;
+    data.into_iter().map(
+	|(k,v)| {sum += v; (k.clone(), sum)}
+    ).collect()
+}
+
 
 fn daily(data: &Series) -> Series {
     (1..data.len()).map(
@@ -232,10 +461,13 @@ fn daily(data: &Series) -> Series {
 
 fn growths(data: &Series, avg: usize) -> Series {
     (0..data.len()).map(
-	|i| (data[i].0, match data[i].1 <= 0.0 || data[i - avg.min(i)].1 <= 0.0 {
-	    true => 1.0,
-	    false => (data[i].1 / data[i - avg.min(i)].1).powf(1.0 / avg as f64)
-	})
+	|i| {
+	    let f = (data[i].1 / data[i - avg.min(i)].1).powf(1.0 / avg as f64);
+	    (data[i].0, match /* !f.is_normal() || */ f == 0.0 {
+		true => 1.0,
+		false => f
+	    })
+	}
     ).collect()
 }
 
@@ -245,6 +477,18 @@ fn average(data: &Series, avg: usize) -> Series {
     (0..data.len()).map(|i| {
 	sum += data[i].1 - if i >= avg {data[i-avg].1} else {0.0};
 	(data[i].0, sum / avg.min(i+1) as f64)
+    }).collect()
+}
+
+
+fn average_tests(data: &TestsData, avg: usize) -> TestsData {
+    let mut cases = 0.0;
+    let mut tests = 0.0;
+    (0..data.len()).map(|i| {
+	cases += (data[i].1).0 - if i >= avg {(data[i-avg].1).0} else {0.0};
+	tests += (data[i].1).1 - if i >= avg {(data[i-avg].1).1} else {0.0};
+	(data[i].0, (cases / avg.min(i+1) as f64,
+		     tests / avg.min(i+1) as f64))
     }).collect()
 }
 

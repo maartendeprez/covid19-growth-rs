@@ -1,5 +1,6 @@
 mod graph;
 mod error;
+mod sus;
 mod csse;
 mod sciensano;
 
@@ -9,6 +10,7 @@ use std::collections::BTreeMap;
 
 use chrono::naive::NaiveDate;
 use serde_json::json;
+use unidecode::unidecode;
 
 use graph::{Series,CasesData,TestsData};
 use error::{Result,Error};
@@ -40,6 +42,10 @@ fn main() -> Result<()> {
     
     if let Err(err) = sciensano_test_graphs(&graph_path, &cache_path, &smoothings) {
 	eprintln!("Error: sciensano test graphs: {}", err);
+    }
+
+    if let Err(err) = sus_test_graphs(&graph_path, &smoothings) {
+	eprintln!("Error: sus test graphs: {}", err);
     }
 
     Ok(())
@@ -400,6 +406,55 @@ fn sciensano_test_graphs(graph_path: &Path, cache_path: &Path, smoothings: &Vec<
 
 }
 
+fn sus_test_graphs(graph_path: &Path, smoothings: &Vec<usize>) -> Result<()> {
+
+    let estados = vec![
+	("AC", "Acre"),
+	("AL", "Alagoas"),
+	("AP", "Amapá"),
+	("AM", "Amazonas"),
+	("BA", "Bahia"),
+	("CE", "Ceará"),
+	("DF", "Distrito Federal"),
+	("ES", "Espírito Santo"),
+	("GO", "Goiás"),
+	("MA", "Maranhão"),
+	("MT", "Mato Grosso"),
+	("MS", "Mato Grosso do Sul"),
+	("MG", "Minas Gerais"),
+	("PA", "Pará"),
+	("PB", "Paraíba"),
+	("PR", "Paraná"),
+	("PE", "Pernambuco"),
+	("PI", "Piauí"),
+	("RJ", "Rio de Janeiro"),
+	("RN", "Rio Grande do Norte"),
+	("RS", "Rio Grande do Sul"),
+	("RO", "Rondônia"),
+	("RR", "Roraima"),
+	("SC", "Santa Catarina"),
+	("SP", "São Paulo"),
+	("SE", "Sergipe"),
+	("TO", "Tocantins")
+    ];
+
+    let data : Vec<(String,TestsData)> = estados.iter().filter_map(
+	|(codigo,estado)| match sus::tests(estado, None, &codigo.to_lowercase()) {
+	    Ok(data) => Some((estado.to_string(), data)),
+	    Err(_) => { println!("Warning: query for {} failed!", estado); None }
+	}).collect();
+
+    for (estado,data) in data.iter() {
+	test_graphs(&graph_path, &smoothings, &format!("brazil/estados/{}", unidecode(estado)),
+		    estado, data)?;
+    }
+
+    test_graphs_regions(&graph_path, &smoothings, "brazil/pais",
+			"Brazil", &data)?;
+
+    Ok(())
+    
+}
 
 fn case_graphs(graph_path: &Path, smoothings: &Vec<usize>, group: &str, level: &str,
 	       var: &str, data: &CasesData) -> Result<()> {

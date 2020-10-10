@@ -16,6 +16,7 @@ pub enum Error {
     ParseDate(chrono::format::ParseError),
     MissingRegion(&'static str),
     MissingData,
+    ESQueryFailed(String),
 }
 
 impl From<io::Error> for Error {
@@ -74,6 +75,7 @@ impl fmt::Display for Error {
 	    Self::ParseDate(err) => write!(f, "Date parse error: {}", err),
 	    Self::MissingRegion(name) => write!(f, "Missing region: {}", name),
 	    Self::MissingData => write!(f, "No data!"),
+	    Self::ESQueryFailed(e) => write!(f, "Elasticsearch query failed: {}", e),
 	}
     }
 }

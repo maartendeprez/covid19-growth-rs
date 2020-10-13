@@ -108,18 +108,21 @@ pub fn tests(name: &str, filter: Option<Value>, indices: &str) -> Result<TestsDa
 	    let mut tests = BTreeMap::new();
 	    
 	    for date_bucket in result.sub.aggregations.date.buckets {
-		let results = tests.entry(NaiveDateTime::from_timestamp(date_bucket.key / 1000, 0).date())
-		    .or_insert((0.0,0.0));
+		let (pos,neg,all) = tests.entry(NaiveDateTime::from_timestamp(date_bucket.key / 1000, 0).date())
+		    .or_insert((0.0,0.0,0.0));
 		for result_bucket in date_bucket.sub.resultados.buckets {
 		    match result_bucket.key {
 			TestResult::Confirmado => {
-			    results.0 += result_bucket.doc_count as f64;
-			    results.1 += result_bucket.doc_count as f64;
+			    *pos += result_bucket.doc_count as f64;
+			    *all += result_bucket.doc_count as f64;
 			},
 			TestResult::Descartado => {
-			    results.1 += result_bucket.doc_count as f64;
+			    *neg += result_bucket.doc_count as f64;
+			    *all += result_bucket.doc_count as f64;
 			},
-			TestResult::Unexpected => {}
+			TestResult::Unexpected => {
+			    *all += result_bucket.doc_count as f64;
+			}
 		    }
 		}
 	    }
@@ -128,7 +131,7 @@ pub fn tests(name: &str, filter: Option<Value>, indices: &str) -> Result<TestsDa
 					    Some(*tests.keys().max().ok_or(Error::MissingData)?));
 
 	    Ok(date_range.map(
-		|date| (date.clone(), tests.remove(&date).unwrap_or((0.0,0.0)))
+		|date| (date.clone(), tests.remove(&date).unwrap_or((0.0,0.0,0.0)))
 	    ).collect())
 
 	},

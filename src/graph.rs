@@ -11,7 +11,7 @@ use super::error::Result;
 
 pub type Series = Vec<(NaiveDate,f64)>;
 pub type CasesData = Vec<(String,Series)>;
-pub type TestsData = Vec<(NaiveDate,(f64,f64))>;
+pub type TestsData = Vec<(NaiveDate,(f64,f64,f64))>;
 
 
 pub fn cases_graph(graph_path: &Path, group: &str, level: &str, var: &str,
@@ -87,7 +87,7 @@ pub fn test_positivity_graph(graph_path: &Path, group: &str, level: &str,
     graph(&graph_path, &filename, &title, "Proportion of positive tests",
 	  &json!({"domain":[0.0, 1.0]}), &vec![], &data.iter().map(
 	      |(region,series)| (region.clone(), series.iter().map(
-		  |(date,(pos,all))| (date.clone(), pos / all)
+		  |(date,(pos,neg,_all))| (date.clone(), pos / (pos + neg))
 	      ).collect())
 	  ).collect())
 }
@@ -107,7 +107,7 @@ pub fn total_tests_graph(graph_path: &Path, group: &str, level: &str,
     graph(&graph_path, &filename, &title, "Number of tests",
 	  &json!({}), &vec![], &data.iter().map(
 	      |(region,series)| (region.clone(), series.iter().map(
-		  |(date,(_pos,all))| (date.clone(), *all)
+		  |(date,(_pos,_neg,all))| (date.clone(), *all)
 	      ).collect())
 	  ).collect())
 }
@@ -296,12 +296,12 @@ fn graph_tests(graph_path: &Path, path: &str, title: &str,
 	    {
 		"data": {
 		    "values": data.iter().filter_map(
-			|(date,(cases,tests))| match *tests == 0.0 {
+			|(date,(pos,neg,all))| match *pos + *neg == 0.0 {
 			    true => None,
 			    false => Some(json!({
 				"Date": format!("{}", date.format("%Y-%m-%d")),
-				"Total": tests,
-				"Positive": 1f64.min(cases / tests)
+				"Total": all,
+				"Positive": 1f64.min(pos / (pos + neg))
 			    }))
 			}
 		    ).collect::<Vec<_>>(),

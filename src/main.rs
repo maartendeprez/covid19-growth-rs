@@ -359,20 +359,23 @@ fn sciensano_test_graphs(graph_path: &Path, cache_path: &Path, smoothings: &Vec<
 	let date = NaiveDate::parse_from_str(row.date.as_ref().map(|d| d.as_str())
 					     .unwrap_or("2020-02-29"), "%Y-%m-%d")?;
 	if let Some(province) = row.province.clone() {
-	    let ent = by_province.entry(province.clone()).or_insert_with(BTreeMap::new)
-		.entry(date).or_insert((0.0,0.0));
-	    ent.0 += row.tests_all_pos as f64;
-	    ent.1 += row.tests_all as f64;
+	    let (pos,neg,all) = by_province.entry(province.clone()).or_insert_with(BTreeMap::new)
+		.entry(date).or_insert((0.0,0.0,0.0));
+	    *pos += row.tests_all_pos as f64;
+	    *neg += (row.tests_all - row.tests_all_pos) as f64;
+	    *all += row.tests_all as f64;
 	}
 	if let Some(region) = row.region.as_ref() {
-	    let ent = by_region.entry(region.clone()).or_insert_with(BTreeMap::new)
-		.entry(date).or_insert((0.0,0.0));
-	    ent.0 += row.tests_all_pos as f64;
-	    ent.1 += row.tests_all as f64;
+	    let (pos,neg,all) = by_region.entry(region.clone()).or_insert_with(BTreeMap::new)
+		.entry(date).or_insert((0.0,0.0,0.0));
+	    *pos += row.tests_all_pos as f64;
+	    *neg += (row.tests_all - row.tests_all_pos) as f64;
+	    *all += row.tests_all as f64;
 	}
-	let ent = by_country.entry(date).or_insert((0.0,0.0));
-	ent.0 += row.tests_all_pos as f64;
-	ent.1 += row.tests_all as f64;
+	let (pos,neg,all) = by_country.entry(date).or_insert((0.0,0.0,0.0));
+	*pos += row.tests_all_pos as f64;
+	*neg += (row.tests_all - row.tests_all_pos) as f64;
+	*all += row.tests_all as f64;
     }
 
     let date_range = NaiveDateRange(*by_country.keys().min().ok_or(Error::MissingData)?,
@@ -381,19 +384,19 @@ fn sciensano_test_graphs(graph_path: &Path, cache_path: &Path, smoothings: &Vec<
     let groups : Vec<(&str,Vec<(String,_)>)> = vec![
 	("region", by_region.into_iter().map(
 	    |(key,mut series)| (key, date_range.clone().map(
-		|date| (date, series.remove(&date).unwrap_or((0.0,0.0)))
+		|date| (date, series.remove(&date).unwrap_or((0.0,0.0,0.0)))
 	    ).collect())
 	).collect()),
 	("province", by_province.into_iter().map(
 	    |(key,mut series)| (key, date_range.clone().map(
-		|date| (date, series.remove(&date).unwrap_or((0.0,0.0)))
+		|date| (date, series.remove(&date).unwrap_or((0.0,0.0,0.0)))
 	    ).collect())
 	).collect())
     ];
 
     test_graphs(&graph_path, &smoothings, "belgium/tests/country", "Belgium",
 		&date_range.clone().map(
-		    |date| (date.clone(), by_country.remove(&date).unwrap_or((0.0,0.0)))
+		    |date| (date.clone(), by_country.remove(&date).unwrap_or((0.0,0.0,0.0)))
 		).collect())?;
 
     for (group,regions) in groups {
@@ -451,10 +454,11 @@ fn sus_test_graphs(graph_path: &Path, smoothings: &Vec<usize>) -> Result<()> {
 	test_graphs(&graph_path, &smoothings, &format!("brazil/estados/{}", unidecode(estado)),
 		    estado, data)?;
 
-	for (date,ent) in data {
-	    let sum = summed_data.entry(date.clone()).or_insert((0.0,0.0));
-	    sum.0 += ent.0;
-	    sum.1 += ent.1;
+	for (date,(pos,neg,all)) in data {
+	    let sum = summed_data.entry(date.clone()).or_insert((0.0,0.0,0.0));
+	    sum.0 += pos;
+	    sum.1 += neg;
+	    sum.2 += all;
 	}
 
     }
@@ -466,7 +470,7 @@ fn sus_test_graphs(graph_path: &Path, smoothings: &Vec<usize>) -> Result<()> {
 			"Brazil", &data)?;
     test_graphs(&graph_path, &smoothings, "brazil/pais",
 		"Brazil", &date_range.map(
-		    |date| (date.clone(), summed_data.remove(&date).unwrap_or((0.0,0.0)))
+		    |date| (date.clone(), summed_data.remove(&date).unwrap_or((0.0,0.0,0.0)))
 		).collect())?;
 
     Ok(())
@@ -598,13 +602,16 @@ fn average(data: &Series, avg: usize) -> Series {
 
 
 fn average_tests(data: &TestsData, avg: usize) -> TestsData {
-    let mut cases = 0.0;
-    let mut tests = 0.0;
+    let mut pos = 0.0;
+    let mut neg = 0.0;
+    let mut all = 0.0;
     (0..data.len()).map(|i| {
-	cases += (data[i].1).0 - if i >= avg {(data[i-avg].1).0} else {0.0};
-	tests += (data[i].1).1 - if i >= avg {(data[i-avg].1).1} else {0.0};
-	(data[i].0, (cases / avg.min(i+1) as f64,
-		     tests / avg.min(i+1) as f64))
+	pos += (data[i].1).0 - if i >= avg {(data[i-avg].1).0} else {0.0};
+	neg += (data[i].1).1 - if i >= avg {(data[i-avg].1).1} else {0.0};
+	all += (data[i].1).2 - if i >= avg {(data[i-avg].1).2} else {0.0};
+	(data[i].0, (pos / avg.min(i+1) as f64,
+		     neg / avg.min(i+1) as f64,
+		     all / avg.min(i+1) as f64,))
     }).collect()
 }
 

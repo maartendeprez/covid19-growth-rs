@@ -94,6 +94,7 @@ dependencies = [
  "chrono",
  "csv",
  "encoding_rs",
+ "lazy_static",
  "reqwest",
  "serde",
  "serde_json",

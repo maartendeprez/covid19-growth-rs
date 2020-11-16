@@ -2,6 +2,7 @@ use std::{io,fs};
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
+use std::collections::HashMap;
 
 use chrono::naive::NaiveDate;
 use serde_json::{Value,json};
@@ -12,18 +13,29 @@ use super::error::Result;
 pub type Series = Vec<(NaiveDate,f64)>;
 pub type CasesData = Vec<(String,Series)>;
 pub type TestsData = Vec<(NaiveDate,(f64,f64,f64))>;
+pub type Population = HashMap<&'static str,u64>;
+pub type Refs = Vec<(Option<&'static str>, f64)>;
 
-
-pub fn cases_graph(graph_path: &Path, group: &str, level: &str, var: &str,
-		   scale: &Value, refs: &Vec<f64>, data: &CasesData) -> Result<()> {
+pub fn cases_graph(graph_path: &Path, group: &str, level: &str,
+		   var: &str, scale: &Value, refs: &Refs,
+		   data: &CasesData) -> Result<()> {
     let graph_path = graph_path.join(group);
     graph(&graph_path, "absolute.html",
 	  &format!("Number of total {} by {}", var, level),
 	  "Count", scale, refs, data)
 }
 
+pub fn relative_graph(graph_path: &Path, group: &str, level: &str,
+		      var: &str, scale: &Value, refs: &Refs,
+		      data: &CasesData) -> Result<()> {
+    let graph_path = graph_path.join(group);
+    graph(&graph_path, "relative.html",
+	  &format!("Number of total {} per 100k by {}", var, level),
+	  "Count / 100k", scale, refs, data)
+}
 
-pub fn daily_graph(graph_path: &Path, group: &str, level: &str, var: &str, refs: &Vec<f64>,
+
+pub fn daily_graph(graph_path: &Path, group: &str, level: &str, var: &str, refs: &Refs,
 		   smoothing: usize, data: &CasesData) -> Result<()> {
     let graph_path = graph_path.join(group);
     let filename = match smoothing {
@@ -36,6 +48,21 @@ pub fn daily_graph(graph_path: &Path, group: &str, level: &str, var: &str, refs:
 		     n, var, level),
     };
     graph(&graph_path, &filename, &title, "Count",
+	  &json!({}), refs, data)
+}
+
+pub fn incidence_graph(graph_path: &Path, group: &str, level: &str, var: &str, refs: &Refs,
+		       smoothing: usize, data: &CasesData) -> Result<()> {
+    let graph_path = graph_path.join(group);
+    let filename = match smoothing {
+	1 => format!("incidence.html"),
+	n => format!("incidence-{}days.html", n),
+    };
+    let title = match smoothing {
+	n => format!("{}-day incidence of {} by {}",
+		     n, var, level),
+    };
+    graph(&graph_path, &filename, &title, "Incidence",
 	  &json!({}), refs, data)
 }
 
@@ -53,12 +80,13 @@ pub fn growth_graph(graph_path: &Path, group: &str, level: &str,
 		     n, var, level)
     };
     graph(&graph_path, &filename, &title, "Factor",
-	  &json!({"domain":[0.5, 1.5]}), &vec![1.0], data)
+	  &json!({"domain":[0.5, 1.5]}), &vec![(None, 1.0)], data)
 }
 
 
 pub fn tests_graph(graph_path: &Path, group: &str, region: &str,
-		   smoothing: usize, data: &TestsData) -> Result<()> {
+		   smoothing: usize, data: &TestsData,
+		   refs: &Refs) -> Result<()> {
     let graph_path = graph_path.join(group);
     let filename = match smoothing {
 	1 => format!("tests.html"),
@@ -69,11 +97,12 @@ pub fn tests_graph(graph_path: &Path, group: &str, region: &str,
 	n => format!("{}-day averaged evolution of COVID-19 \
 		      test results ({})", n, region)
     };
-    graph_tests(&graph_path, &filename, &title, data)
+    graph_tests(&graph_path, &filename, &title, data, refs)
 }
 
 pub fn test_positivity_graph(graph_path: &Path, group: &str, level: &str,
-			smoothing: usize, data: &Vec<(String,TestsData)>) -> Result<()> {
+			     smoothing: usize, data: &Vec<(String,TestsData)>,
+			     refs: &Refs) -> Result<()> {
     let graph_path = graph_path.join(group);
     let filename = match smoothing {
 	1 => format!("positive-tests.html"),
@@ -85,7 +114,7 @@ pub fn test_positivity_graph(graph_path: &Path, group: &str, level: &str,
 		      test positivity ratio by {}", n, level)
     };
     graph(&graph_path, &filename, &title, "Proportion of positive tests",
-	  &json!({"domain":[0.0, 1.0]}), &vec![], &data.iter().map(
+	  &json!({"domain":[0.0, 1.0]}), refs, &data.iter().map(
 	      |(region,series)| (region.clone(), series.iter().map(
 		  |(date,(pos,neg,_all))| (date.clone(), pos / (pos + neg))
 	      ).collect())
@@ -113,8 +142,8 @@ pub fn total_tests_graph(graph_path: &Path, group: &str, level: &str,
 }
 
 
-fn graph(graph_path: &Path, path: &str, title: &str, ytitle: &str, scale: &Value,
-	 refs: &Vec<f64>, data: &CasesData) -> Result<()> {
+fn graph(graph_path: &Path, path: &str, title: &str, ytitle: &str,
+	 scale: &Value, refs: &Refs, data: &CasesData) -> Result<()> {
 
     fs::create_dir_all(graph_path)?;
     let mut out = io::BufWriter::new(File::create(graph_path.join(path))?);
@@ -140,7 +169,7 @@ fn graph(graph_path: &Path, path: &str, title: &str, ytitle: &str, scale: &Value
 	"data": {
 	    "values": data.iter().flat_map(
 		|(region,vals)| vals.iter().filter_map(
-		    move |(date,val)| match val.is_normal() {
+		    move |(date,val)| match val.is_finite() {
 			false => None,
 			true => Some(json!({
 			    "Date": format!("{}", date.format("%Y-%m-%d")),
@@ -239,21 +268,38 @@ fn graph(graph_path: &Path, path: &str, title: &str, ytitle: &str, scale: &Value
 		}
 	    },
 	    {
-		"mark": {
-		    "color": "red",
-		    "opacity": 0.5,
-		    "size": 1,
-		    "type":"rule"
-		},
 		"data": {
-		    "values": refs.iter().map(|y| json!({"Value": y})).collect::<Vec<_>>()
+		    "values": refs.iter().map(
+			|(name,y)| json!({
+			    "Name": name.unwrap_or(""),
+			    "Value": y
+			})).collect::<Vec<_>>()
 		},
 		"encoding": {
 		    "y": {
 			"field":"Value",
 			"type":"quantitative"
 		    }
-		}
+		},
+		"layer": [
+		    {
+			"mark": {
+			    "color": "red",
+			    "opacity": 0.5,
+			    "size": 1,
+			    "type":"rule"
+			}
+		    },
+		    {
+			"mark": {
+			    "type": "text",
+			    "color": "red"
+			},
+			"encoding": {
+			    "text": {"field": "Name"}
+			}
+		    }
+		]
 	    }
 	]
     }))?;
@@ -269,7 +315,7 @@ fn graph(graph_path: &Path, path: &str, title: &str, ytitle: &str, scale: &Value
 
 
 fn graph_tests(graph_path: &Path, path: &str, title: &str,
-	       data: &TestsData) -> Result<()> {
+	       data: &TestsData, refs: &Refs) -> Result<()> {
 
     fs::create_dir_all(graph_path)?;
     let mut out = io::BufWriter::new(File::create(graph_path.join(path))?);
@@ -399,6 +445,51 @@ fn graph_tests(graph_path: &Path, path: &str, title: &str,
 				{"field": "Positive", "type": "quantitative",
 				 "format": ".3f"}
 			    ]
+			}
+		    }
+		]
+	    },
+	    {
+		"data": {
+		    "values": refs.iter().map(
+			|(name,y)| json!({
+			    "Name": name.unwrap_or(""),
+			    "Value": y
+			})).collect::<Vec<_>>()
+		},
+		"encoding": {
+		    "y": {
+			"field":"Value",
+			"type":"quantitative",
+			"scale": {
+			    "domain": [0, 1]
+			},
+			"axis": {
+			    "title": null
+			}
+		    }
+		},
+		"layer": [
+		    {
+			"mark": {
+			    "color": "red",
+			    "opacity": 0.5,
+			    "size": 1,
+			    "type":"rule"
+			},
+			"selection": {
+			    "Grid3": {"bind":"scales","type":"interval"}
+			}
+		    },
+		    {
+			"mark": {
+			    "type": "text",
+			    "color": "red"
+			},
+			"encoding": {
+			    "text": {
+				"field": "Name"
+			    }
 			}
 		    }
 		]
